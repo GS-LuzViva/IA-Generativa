@@ -108,5 +108,5 @@ Com os documentos e os dados das luminárias, o mesmo modelo passa de 5% para 62
 
 **Links:** 
 
-Repositório: https://github.com/GS-LuzViva/IA-Generativa_preencher_ 
+Repositório: https://github.com/GS-LuzViva/IA-Generativa
 Vídeo : (https://youtu.be/IdpS3Oqmkws)
