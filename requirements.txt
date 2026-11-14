@@ -1,0 +1,10 @@
+torch>=2.6
+transformers>=4.51
+accelerate
+sentence-transformers
+xgrammar
+fastapi
+uvicorn
+pandas
+matplotlib
+ipykernel

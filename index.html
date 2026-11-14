@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LuzViva · Assistente</title>
+<style>
+  body { font-family: Arial, sans-serif; margin: 0; background: #f4f5f7; color: #222; }
+  header { background: #1d2b3a; color: #fff; padding: 16px 24px; }
+  header h1 { margin: 0; font-size: 22px; }
+  header p { margin: 4px 0 0; color: #c9d3dd; font-size: 14px; }
+  main { display: grid; grid-template-columns: 1.4fr 1fr; gap: 20px; padding: 20px 24px; }
+  section { background: #fff; border-radius: 8px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+  h2 { margin-top: 0; font-size: 17px; }
+  h3 { font-size: 14px; margin: 16px 0 6px; color: #555; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #eee; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: #eef4ff; }
+  tbody tr.selecionada { background: #d6e6ff; }
+  .tabela { max-height: 70vh; overflow-y: auto; }
+  .apagada { color: #c0392b; font-weight: bold; }
+  .insuficiente { color: #d68910; font-weight: bold; }
+  input { width: 140px; padding: 6px; font-size: 14px; }
+  .perguntas button { display: block; width: 100%; text-align: left; margin: 6px 0; padding: 10px;
+                      background: #e8eef7; color: #1d2b3a; border: 0; border-radius: 4px; font-size: 14px; cursor: pointer; }
+  .perguntas button:hover { background: #d6e6ff; }
+  .perguntas button:disabled { color: #999; cursor: default; }
+  .resposta { margin-top: 16px; padding: 12px; background: #f7f9fc; border-left: 4px solid #1d6fd8; }
+  .recusa { border-left-color: #999; }
+  .pergunta-feita { font-size: 12px; color: #555; margin-bottom: 6px; }
+  .fonte { font-size: 12px; color: #555; margin-top: 8px; }
+  @media (max-width: 800px) { main { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>LuzViva · Assistente de manutenção</h1>
+  <p>Escolha uma luminária na lista e depois uma das perguntas.</p>
+</header>
+
+<main>
+  <section>
+    <h2>Luminárias com falha (por prioridade)</h2>
+    <div class="tabela">
+      <table>
+        <thead><tr><th>Placa</th><th>Endereço</th><th>Área</th><th>Situação</th><th>Prioridade</th></tr></thead>
+        <tbody id="lista"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Pergunte ao assistente</h2>
+    <p>Placa: <input id="placa" readonly placeholder="clique na lista"></p>
+
+    <div class="perguntas">
+      <h3>Sobre a luminária escolhida</h3>
+      <button onclick="perguntar('A luz da luminária {placa} está ok?', true)">A luz dela está ok?</button>
+      <button onclick="perguntar('Qual a situação da luminária {placa} e quanto de luz foi medido?', true)">Qual a situação e quanto de luz foi medido?</button>
+      <button onclick="perguntar('Qual a prioridade da luminária {placa}?', true)">Qual a prioridade dela na fila?</button>
+      <button onclick="perguntar('A luminária {placa} já tem chamado aberto?', true)">Ela já tem chamado aberto?</button>
+
+      <h3>Dúvidas gerais</h3>
+      <button onclick="perguntar('Qual telefone eu ligo para pedir o conserto de um poste apagado na minha rua?', false)">Qual telefone eu ligo para pedir conserto?</button>
+      <button onclick="perguntar('Roubaram os fios da iluminação da minha rua. Quanto tempo demora para religar?', false)">Roubaram os fios: quanto tempo para religar?</button>
+    </div>
+
+    <div id="resposta"></div>
+  </section>
+</main>
+
+<script>
+  // carrega a lista de luminárias da API
+  fetch("/luminarias").then(r => r.json()).then(lista => {
+    document.getElementById("lista").innerHTML = lista.map(l => `
+      <tr id="${l.placa}" onclick="escolher('${l.placa}')">
+        <td>${l.placa}</td><td>${l.endereco}</td><td>${l.subprefeitura}</td>
+        <td class="${l.situacao}">${l.situacao}</td><td>${l.prioridade}</td>
+      </tr>`).join("");
+  });
+
+  // clicar numa luminária só escolhe a placa; o botão monta a pergunta com ela
+  function escolher(placa) {
+    document.querySelectorAll("tr.selecionada").forEach(tr => tr.classList.remove("selecionada"));
+    document.getElementById(placa).classList.add("selecionada");
+    document.getElementById("placa").value = placa;
+  }
+
+  async function perguntar(modelo, usaPlaca) {
+    const placa = document.getElementById("placa").value;
+    const caixa = document.getElementById("resposta");
+    if (usaPlaca && !placa) {
+      caixa.innerHTML = '<div class="resposta recusa">Escolha uma luminária na lista primeiro.</div>';
+      return;
+    }
+    const pergunta = modelo.replace("{placa}", placa);
+    const botoes = document.querySelectorAll(".perguntas button");
+    botoes.forEach(b => b.disabled = true);
+    caixa.innerHTML = '<div class="resposta">Pensando...</div>';
+    try {
+      const r = await fetch("/perguntar", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({pergunta})
+      });
+      const d = await r.json();
+      let fontes = d.fontes.map(f => `Fonte: ${f.titulo}`).join("<br>");
+      if (!fontes && !d.recusou && usaPlaca) fontes = "Fonte: dados da luminária";
+      caixa.innerHTML = `<div class="resposta ${d.recusou ? "recusa" : ""}">
+        <div class="pergunta-feita">${pergunta}</div>${d.resposta}
+        <div class="fonte">${fontes}</div></div>`;
+    } catch (e) {
+      caixa.innerHTML = '<div class="resposta recusa">Assistente indisponível. Confira se a API está rodando.</div>';
+    }
+    botoes.forEach(b => b.disabled = false);
+  }
+</script>
+</body>
+</html>
