@@ -12,34 +12,57 @@ Generative AI for Engineering - Global Solution 2026.2 - 4-ESPY
 
 ## Ficha Técnica
 
-- **Produto:** LuzViva
-- **Problema:** Atualmente no estado de São Paulo, só é possível descobrir que uma luminária apagou quando alguém reclama, e a rua fica escura e insegura
-- **Território Simulado:** Sé, Pinheiros e Campo Limpo (São Paulo)
-- **O que a IA faz:** responde dúvidas sobre a manutenção da iluminação pública citando a fonte, e caso não encontre a resposta, diz "não consta".
-- **Modelo:** Qwen2.5-1.5B-Instruct, rodando local
-- **ODS:** 11, 9 e 10
+| Campo | Conteúdo |
+|---|---|
+| Nome do produto | LuzViva |
+| Cidadão e território | Pessoas que circulam à noite nas áreas-piloto Sé, Pinheiros e Campo Limpo, na cidade de São Paulo |
+| Problema, em uma frase | Na cidade de São Paulo, uma luminária apagada só é identificada quando um morador registra uma reclamação; até o reparo, a via permanece escura e insegura |
+| Proposta de valor | Encontrar a falha antes da reclamação e indicar ao gestor o que consertar primeiro |
+| O que a IA resolve | Responde dúvidas sobre a manutenção da iluminação pública e sobre a situação de cada luminária, citando a fonte; quando a informação não está na base, responde "não consta" |
+| Arquitetura | Busca semântica nos documentos (RAG), ferramenta `consultar_fila` com os dados das luminárias e LLM local com saída em JSON, expostos pela API `POST /perguntar` |
+| Fontes de dados | SP Regula, Câmara Municipal de São Paulo, ANEEL, LGPD e regras do LuzViva (47 trechos); 99 luminárias com falha (dados simulados) |
+| Modelos de IA | Qwen2.5-1.5B-Instruct (local) e embeddings `intfloat/multilingual-e5-small` |
+| URL do MVP e repositório | MVP: http://52.67.217.30 · Repositório: https://github.com/GS-LuzViva/IA-Generativa |
+| Indicadores de impacto | % de falhas encontradas antes de relato; tempo até o reparo; horas-luminária no escuro por noite |
+| ODS | 11, 9 e 10 |
 
-## Como funciona
+## Pipeline de IA
 
-1. A busca acha os 3 trechos dos documentos mais parecidos com a pergunta (RAG).
-2. Se a pergunta tem uma placa (ex.: IP0699800), a ferramenta `consultar_fila` pega os dados da luminária.
-3. O modelo lê esse contexto e responde em JSON.
+```mermaid
+flowchart TD
+    subgraph DOC["Preparação da base (uma vez)"]
+        F["Fontes públicas<br/>SP Regula, Câmara, ANEEL, LGPD<br/>e regras do LuzViva"] --> T["47 trechos com título e link<br/>base/documentos.jsonl"]
+        T --> V["Vetores dos trechos<br/>multilingual-e5-small"]
+    end
+    P["Pergunta"] --> B["Busca semântica<br/>3 trechos mais parecidos"]
+    V --> B
+    B --> X{"A pergunta tem placa?<br/>IP + 7 dígitos"}
+    X -- sim --> Q{"consultar_fila<br/>base/luminarias.json"}
+    Q -- placa encontrada --> C1["Contexto: dados da luminária + 3 trechos"]
+    Q -- placa inexistente --> N["Não consta<br/>(o modelo não é chamado)"]
+    X -- não --> L{"Nota da busca ≥ 0,86?"}
+    L -- não --> N
+    L -- sim --> C2["Contexto: 3 trechos"]
+    C1 --> M["Qwen2.5-1.5B local<br/>JSON garantido pelo xgrammar"]
+    C2 --> M
+    M --> J["Resposta em JSON<br/>resposta, fontes, recusou, confianca"]
+```
 
-O código está em `api.py`. A avaliação está em `notebooks/assistente.ipynb`.
+O código está em `api.py`, e a avaliação completa em `notebooks/assistente.ipynb`.
 
 ![Site do assistente](imagens/site.png)
 
-No site, você escolhe uma luminária na lista e clica numa pergunta. A resposta mostra a fonte usada.
+Na interface, o usuário escolhe uma luminária da lista e seleciona uma pergunta; a resposta exibe a fonte utilizada.
 
 ## 01. Tarefa e testes
 
-A IA responde sobre manutenção da iluminação: prazo, responsável, como pedir conserto e situação de uma luminária.
+A IA responde sobre a manutenção da iluminação pública: prazos, responsáveis, como solicitar o conserto e a situação de uma luminária específica.
 
-A prova (`avaliacao/prova.jsonl`) tem 47 perguntas com gabarito: 30 sobre os documentos, 7 sobre luminárias e 10 que não constam na base.
+A prova (`avaliacao/prova.jsonl`) contém 47 perguntas com gabarito: 30 sobre os documentos, 7 sobre luminárias e 10 cuja resposta não consta na base.
 
 ## 02. Base de conhecimento
 
-`base/documentos.jsonl` tem 47 trechos, cada um com título e link.
+O arquivo `base/documentos.jsonl` contém 47 trechos, cada um com título e link da fonte.
 
 | Fonte | Formato | Licença | Trechos |
 |---|---|---|---|
@@ -49,23 +72,23 @@ A prova (`avaliacao/prova.jsonl`) tem 47 perguntas com gabarito: 30 sobre os doc
 | LGPD | HTML | Lei | 6 |
 | Regras do LuzViva | Markdown | Própria | 8 |
 
-`base/luminarias.json` tem 99 luminárias com falha (dados simulados).
+O arquivo `base/luminarias.json` contém 99 luminárias com falha (dados simulados).
 
 ## 03. Busca e limiar
 
 - recall@1: 0,70
 - recall@3: 0,77
-- Limiar: 0,86 (abaixo disso a resposta é "não consta")
+- Limiar: 0,86 (abaixo dele, a resposta é "não consta" e o modelo não é chamado)
 
-O limiar 0,86 deixa passar 25 das 30 perguntas com resposta e barra 9 das 10 que não constam (`avaliacao/limiar.png`).
+Com o limiar de 0,86, passam 25 das 30 perguntas que têm resposta, e são barradas 9 das 10 que não constam na base (`avaliacao/limiar.png`).
 
 ## 04. JSON, citação e recusa
 
-Toda resposta sai no formato `{"resposta", "fontes", "recusou", "confianca"}`. O JSON é garantido pela decodificação restrita (xgrammar). O prompt manda usar só o contexto, citar a fonte e dizer "não consta" quando não souber.
+Toda resposta segue o formato `{"resposta", "fontes", "recusou", "confianca"}`. O JSON é garantido por decodificação restrita (xgrammar), que impede o modelo de gerar texto fora do esquema. O prompt determina o uso exclusivo do contexto, a citação da fonte e a resposta "não consta" quando a informação não estiver disponível.
 
 ## 05. Especialização: agente
 
-A ferramenta `consultar_fila(placa)` traz os dados da luminária, que nenhum documento tem. No começo o modelo decidia quando chamar a ferramenta e só chamou em 4 de 7 perguntas, então passamos essa decisão para o código (regex da placa).
+A ferramenta `consultar_fila(placa)` fornece os dados da luminária, que nenhum documento contém. Inicialmente, o próprio modelo decidia quando acionar a ferramenta e o fez em apenas 4 de 7 perguntas; por isso, essa decisão passou a ser feita no código, pela identificação da placa na pergunta.
 
 ## 06. Placar
 
@@ -75,38 +98,38 @@ A ferramenta `consultar_fila(placa)` traz os dados da luminária, que nenhum doc
 | B - RAG | 0,34 | 0,54 | 0,22 | 0,90 | 0,27 | 0,70 |
 | C - RAG + agente | 0,53 | 0,62 | 0,51 | 1,00 | 0,14 | 1,00 |
 
-- **A** inventa: mandou ligar para "158" (o certo é 0800 779 0156). 82% das respostas que deu estavam erradas.
-- **B** acerta bem mais: 54% de acerto e 29% de respostas erradas.
-- **C** é a melhor: responde as luminárias, recusa tudo que não consta e o JSON sai sempre válido.
+- **A (só o modelo)** alucina: indicou o telefone "158" (o correto é 0800 779 0156), e 82% das respostas fornecidas estavam erradas.
+- **B (RAG)** eleva o acerto factual para 54% e reduz as respostas erradas para 29%.
+- **C (RAG + agente)** apresenta o melhor desempenho: responde sobre as luminárias, recusa todas as perguntas sem resposta na base e gera JSON válido em 100% dos casos.
 
 ## 07. Cinco erros reais
 
-| Pergunta | O que respondeu | Causa | Correção |
+| Pergunta | Resposta obtida | Causa | Correção proposta |
 |---|---|---|---|
-| A IP0697028 tem chamado aberto? | "Sim" (certo), sem fonte | Não preencheu a fonte | Pôr a fonte no código |
-| O que a LGPD considera dado pessoal? | "Não consta" | Nota 0,856, abaixo do limiar | Busca melhor |
-| De quem é a manutenção, pela ANEEL? | Citou uma lei inventada | A busca não trouxe o art. 451 | Só aceitar fontes da busca |
-| A prefeitura precisa do meu consentimento? | "Sim" (o certo é não) | Leu o inciso errado | Um trecho por inciso |
-| Em quanto tempo a luminária é atendida? | "Imediatamente" (certo: 24 h) | A busca trouxe o trecho errado | Busca por palavra-chave |
+| A IP0697028 tem chamado aberto? | "Sim" (correto), sem fonte | O modelo não preencheu o campo de fontes | Preencher a fonte no código ("Fila de manutenção LuzViva") sempre que a ferramenta for usada |
+| O que a LGPD considera dado pessoal? | "Não consta" | Nota da busca de 0,856, logo abaixo do limiar | Busca híbrida (vetores + palavra-chave), que favorece o trecho que contém "dado pessoal" |
+| De quem é a manutenção, pela ANEEL? | Citou uma lei inexistente | A busca não recuperou o art. 451 | Validar no código que toda fonte citada está entre os trechos recuperados, descartando as demais |
+| A prefeitura precisa do meu consentimento? | "Sim" (o correto é não) | O trecho trazia vários incisos, e o modelo leu o errado | Dividir a LGPD em um trecho por inciso, para que o contexto traga apenas o inciso relevante |
+| Em quanto tempo a luminária é atendida? | "Imediatamente" (o correto é 24 h) | A busca recuperou o trecho errado | Reordenar os trechos recuperados com um modelo de re-ranking ou com busca híbrida |
 
-## 08. Como rodar
+## 08. Execução
 
-Dois cliques em `rodar.bat`: ele instala o que falta e abre o site em `http://localhost:8001`.
+Basta executar o arquivo `rodar.bat`, que instala as dependências necessárias e abre a interface em `http://localhost:8001`.
 
-Ou manualmente:
+Execução manual:
 
 ```bash
 pip install -r requirements.txt
 uvicorn api:app --port 8001
 ```
 
-A primeira execução baixa o modelo (~3 GB).
+Na primeira execução, o modelo é baixado (cerca de 3 GB).
 
 ## Conclusão
 
-Com os documentos e os dados das luminárias, o mesmo modelo passa de 5% para 62% de acerto, e as respostas erradas caem de 82% para 28%. A IA não guarda as perguntas nem tem dados pessoais (LGPD).
+Com os documentos e os dados das luminárias, o mesmo modelo passa de 5% para 62% de acerto factual, e as respostas erradas caem de 82% para 28%. A IA não armazena as perguntas e não utiliza dados pessoais (LGPD).
 
-**Links:** 
+**Links:**
 
-Repositório: https://github.com/GS-LuzViva/IA-Generativa
-Vídeo : (https://youtu.be/IdpS3Oqmkws)
+- Repositório: https://github.com/GS-LuzViva/IA-Generativa
+- Vídeo: https://youtu.be/IdpS3Oqmkws
